@@ -1,56 +1,178 @@
-﻿//using HurricaneVR.Scripts.Core;
-////using HurricaneVR.Scripts.Core.Grabbers;
-//using HurricaneVR.Scripts.Core.Utils;
-//using UnityEngine;
+﻿using System;
+using System.Collections;
+using HurricaneVR.Framework.Core;
+using HurricaneVR.Framework.Core.HandPoser;
+using HurricaneVR.Framework.Shared;
+using UnityEngine;
 
-//namespace HurricaneVR.Scripts.HandPoser
-//{
-//    public class HVRHandPoseRecorder : MonoBehaviour
-//    {
-//        public HVRPosableHand Hand;
-//        //public HVRHandGrabber Grabber;
-//        public HVRHandAnimator Animator;
-//        //public HVRHandPhysics HandPhysics;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
-//        public bool UsePhysicsPoser;
-//        public bool RecordPoses;
-//        public bool DisablePhysics;
+namespace HurricaneVR.Framework.Components
+{
+    public class HVRHandPoseRecorder : MonoBehaviour
+    {
+#if ENABLE_LEGACY_INPUT_MANAGER
+        public KeyCode LeftHandSaveKey = KeyCode.L;
+        public KeyCode RightHandSaveKey = KeyCode.R;
+#endif
 
-//        private bool _previousRecordPoses;
+#if ENABLE_INPUT_SYSTEM
 
-//        void Start()
-//        {
-//            if (!Hand) Hand = GetComponentInChildren<HVRPosableHand>();
-//            //if (!Grabber) Grabber = GetComponentInChildren<HVRHandGrabber>();
-//            if (!Animator) Animator = GetComponentInChildren<HVRHandAnimator>();
-//            //if (!HandPhysics) HandPhysics = GetComponentInChildren<HVRHandPhysics>();
-//        }
+        public Key LeftSaveKey = Key.L;
+        public Key RightSaveKey = Key.R;
 
-//        void Update()
-//        {
-//            if (Animator) Animator.UsePhysicsPoser = UsePhysicsPoser;
-        
-//            if (_previousRecordPoses != RecordPoses)
-//            {
-//                if (RecordPoses && DisablePhysics)
-//                {
-//                    //HandPhysics.DisableCollision();
-//                }
-//                else if (!RecordPoses)
-//                {
-//                    //HandPhysics.EnableCollision();
-//                }
-//                _previousRecordPoses = !RecordPoses;
-//            }
+#endif
 
-//            //if (RecordPoses && Hand && Grabber && VRInputActions.GetButtonState(Hand.Side, VRButtons.Primary).JustActivated)
-//            //{
-//            //    var closest = Grabber.GrabBag.ClosestGrabbable;
-//            //    if (closest && closest.VRGrabPoints)
-//            //    {
-//            //        closest.VRGrabPoints.Add(Hand);
-//            //    }
-//            //}
-//        }
-//    }
-//}
+
+        public HVRPosableHand LeftHand;
+        public HVRPosableHand RightHand;
+
+        public HVRHandPhysics LeftPhysics;
+        public HVRHandPhysics RightPhysics;
+
+        public float FadeTimer = 10f;
+        public bool RemoveClones = true;
+
+        public bool DisablePhysics;
+
+        private bool _previousDisable;
+
+        public string Folder;
+        public int Counter = 0;
+
+        public void Start()
+        {
+            Folder = DateTime.Now.ToString("yyyyMMdd_HH_mm");
+        }
+#if UNITY_EDITOR
+        void Update()
+        {
+
+
+            if (DisablePhysics && !_previousDisable)
+            {
+                if (LeftPhysics)
+                {
+                    LeftPhysics.DisableCollision();
+                }
+
+                if (RightPhysics)
+                {
+                    RightPhysics.DisableCollision();
+                }
+            }
+            else if (!DisablePhysics && _previousDisable)
+            {
+                if (LeftPhysics)
+                {
+                    LeftPhysics.EnableCollision();
+                }
+
+                if (RightPhysics)
+                {
+                    RightPhysics.EnableCollision();
+                }
+            }
+
+            _previousDisable = DisablePhysics;
+
+            CheckSnapshot();
+
+        }
+#endif
+        private void CheckSnapshot()
+        {
+            HVRPosableHand hand = null;
+
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(LeftHandSaveKey))
+            {
+                hand = LeftHand;
+            }
+            else if (Input.GetKeyDown(RightHandSaveKey))
+            {
+                hand = RightHand;
+            }
+            else
+                return;
+#elif ENABLE_INPUT_SYSTEM
+
+            if (Keyboard.current[LeftSaveKey].wasPressedThisFrame)
+            {
+                hand = LeftHand;
+            }
+            else if (Keyboard.current[RightSaveKey].wasPressedThisFrame)
+            {
+                hand = RightHand;
+            }
+            else
+                return;
+#endif
+
+            if (!hand)
+                return;
+
+            Snapshot(hand);
+        }
+
+        public void SnapshotLeft()
+        {
+            if (!gameObject.activeSelf)
+                return;
+            if (LeftHand)
+            {
+                Snapshot(LeftHand);
+            }
+        }
+
+        public void SnapshotRight()
+        {
+            if (!gameObject.activeSelf)
+                return;
+
+            if (RightHand)
+            {
+                Snapshot(RightHand);
+            }
+        }
+
+        private void Snapshot(HVRPosableHand hand)
+        {
+
+#if UNITY_EDITOR
+            var pose = hand.CreateFullHandPoseWorld(hand.MirrorAxis);
+
+            HVRSettings.Instance.SaveRunTimePose(pose, Counter++.ToString(), Folder);
+
+            var clone = Instantiate(HVRSettings.Instance.GetPoserHand(hand.Side));
+
+            var posableHand = clone.GetComponent<HVRPosableHand>();
+            if (posableHand != null)
+            {
+                posableHand.Pose(pose.GetPose(hand.Side));
+                clone.transform.position = hand.transform.position;
+                clone.transform.rotation = hand.transform.rotation;
+            }
+
+            var colliders = clone.GetComponentsInChildren<Collider>();
+            foreach (var c in colliders)
+            {
+                c.enabled = false;
+            }
+
+            if (RemoveClones)
+            {
+                StartCoroutine(RemoveClone(clone));
+            }
+#endif
+        }
+
+        public IEnumerator RemoveClone(GameObject clone)
+        {
+            yield return new WaitForSeconds(FadeTimer);
+            Destroy(clone);
+        }
+    }
+}
